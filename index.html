@@ -93,6 +93,7 @@ main { padding: 0 16px; }
 .split > div { background: var(--surface2); border-radius: 12px; padding: 10px 12px; }
 .split .label { font-size: 12px; color: var(--sub); }
 .split .num { font-size: 18px; font-weight: 700; }
+.card-note { font-size: 12px; color: var(--sub); margin-top: 10px; }
 .exp { color: var(--expense); }
 .inc { color: var(--income); }
 
@@ -465,7 +466,17 @@ const ui = { tab: 'home', year: now.getFullYear(), month: now.getMonth(), setTyp
 const catById = id => data.categories.find(c => c.id === id);
 const catsOf = type => data.categories.filter(c => c.type === type);
 const monthKey = () => `${ui.year}-${pad(ui.month + 1)}`;
-const monthRecords = () => data.records.filter(r => r.date.startsWith(monthKey()));
+// カード(メールから入った記録)は使った日の翌月=引き落とし月(26日)で数える
+function countMonthKey(r) {
+  const [y, m] = r.date.split('-').map(Number);
+  const d = new Date(y, r.source === 'mail' ? m : m - 1, 1);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+}
+const monthRecords = () => data.records.filter(r => countMonthKey(r) === monthKey());
+function cardLabel() {
+  const used = new Date(ui.year, ui.month - 1, 1).getMonth() + 1;
+  return `${ui.month + 1}/26引き落とし(${used}月利用分)`;
+}
 const uncategorized = () => data.records.filter(r => !r.categoryId).sort(byDateDesc);
 const total = (list, type) => list.filter(r => r.type === type).reduce((s, r) => s + r.amount, 0);
 function byDateDesc(a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; }
@@ -530,6 +541,7 @@ function renderHome() {
       <div><div class="label">支出</div><div class="num exp">${yen(exp)}</div></div>
       <div><div class="label">収入</div><div class="num inc">${yen(inc)}</div></div>
     </div>
+    <div class="card-note">カード: ${cardLabel()}</div>
   </div>
   <div class="section-title">最近の記録</div>
   ${recent.length ? `<div class="list">${recent.map(recordRow).join('')}</div>` : '<div class="empty">この月の記録はまだありません</div>'}`;
@@ -538,9 +550,12 @@ function renderHome() {
 function renderList() {
   const list = monthRecords().sort(byDateDesc);
   if (!list.length) return '<div class="empty">この月の記録はまだありません。<br>右下の + から追加できます</div>';
+  const card = list.filter(r => r.source === 'mail');
   const groups = {};
-  list.forEach(r => (groups[r.date] = groups[r.date] || []).push(r));
-  return Object.keys(groups).map(date => {
+  list.filter(r => r.source !== 'mail').forEach(r => (groups[r.date] = groups[r.date] || []).push(r));
+  const cardHtml = card.length ? `<div class="date-head"><span>カード ${cardLabel()}</span><span>${yen(total(card, 'expense'))}</span></div>
+    <div class="list">${card.map(recordRow).join('')}</div>` : '';
+  return cardHtml + Object.keys(groups).map(date => {
     const g = groups[date];
     const exp = total(g, 'expense');
     return `<div class="date-head"><span>${dateLabel(date)}</span><span>${exp ? '支出 ' + yen(exp) : ''}</span></div>
@@ -724,14 +739,16 @@ function saveRecord() {
     categoryId: form.categoryId,
     memo: $('fMemo').value.trim(),
   };
+  let saved;
   if (form.id) {
-    Object.assign(data.records.find(r => r.id === form.id), rec);
+    saved = Object.assign(data.records.find(r => r.id === form.id), rec);
     toast('記録を更新しました');
   } else {
-    data.records.push({ id: uid(), source: 'manual', ...rec });
+    saved = { id: uid(), source: 'manual', ...rec };
+    data.records.push(saved);
     toast(rec.categoryId ? '記録を追加しました' : '未分類として追加しました');
   }
-  const [y, m] = rec.date.split('-').map(Number);
+  const [y, m] = countMonthKey(saved).split('-').map(Number);
   ui.year = y; ui.month = m - 1;
   save();
   closeSheet();
