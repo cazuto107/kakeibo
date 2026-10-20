@@ -411,8 +411,8 @@ save();
 // ---- Gmail連携(メール係の住所と合言葉はこの端末の中だけに保存) ----
 const CONN_KEY = 'kakeibo-gmail-conn';
 function loadConn() {
-  try { return { url: '', key: '', lastFetch: null, lastResult: '', ...JSON.parse(localStorage.getItem(CONN_KEY) || '{}') }; }
-  catch (e) { return { url: '', key: '', lastFetch: null, lastResult: '' }; }
+  try { return { url: '', key: '', lastFetch: null, coveredFrom: null, lastResult: '', ...JSON.parse(localStorage.getItem(CONN_KEY) || '{}') }; }
+  catch (e) { return { url: '', key: '', lastFetch: null, coveredFrom: null, lastResult: '' }; }
 }
 let conn = loadConn();
 let fetching = false;
@@ -436,15 +436,13 @@ function saveConn() {
   toast('保存しました');
 }
 
+// 今月の引き落とし分(前月1日〜)は必ず読む。まだそこまで読んでいなければさかのぼる
 function fetchFrom() {
-  const d = new Date();
-  if (conn.lastFetch) {
-    const [y, m, day] = conn.lastFetch.split('-').map(Number);
-    d.setFullYear(y, m - 1, day - 3);
-  } else {
-    d.setDate(1);
-  }
-  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+  const t = new Date();
+  const need = ymd(new Date(t.getFullYear(), t.getMonth() - 1, 1));
+  if (!conn.lastFetch || !conn.coveredFrom || conn.coveredFrom > need) return need;
+  const [y, m, day] = conn.lastFetch.split('-').map(Number);
+  return ymd(new Date(y, m - 1, day - 3));
 }
 
 async function fetchMail(manual) {
@@ -453,7 +451,8 @@ async function fetchMail(manual) {
   render();
   const stamp = () => { const d = new Date(); return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   try {
-    const res = await fetch(conn.url, { method: 'POST', body: JSON.stringify({ key: conn.key, after: fetchFrom() }) });
+    const from = fetchFrom();
+    const res = await fetch(conn.url, { method: 'POST', body: JSON.stringify({ key: conn.key, after: from.replace(/-/g, '/') }) });
     const json = await res.json();
     if (json.error) throw new Error(json.error);
     const known = new Set(data.records.map(r => r.mailId).filter(Boolean));
@@ -471,6 +470,7 @@ async function fetchMail(manual) {
       added++;
     });
     conn.lastFetch = ymd(new Date());
+    if (!conn.coveredFrom || from < conn.coveredFrom) conn.coveredFrom = from;
     conn.lastResult = `${stamp()} に読み込みました(新しく${added}件)` + (json.unreadable ? `。読み取れなかった通知が${json.unreadable}件あります(外貨など)` : '');
     save();
     if (added || manual) toast(`メールから${added}件取り込みました`);
