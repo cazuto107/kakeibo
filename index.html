@@ -223,6 +223,8 @@ body.sorting, body.sorting * { cursor: grabbing !important; user-select: none; -
 .keyword { display: block; margin-top: 8px; }
 .keyword span { display: block; font-size: 12px; color: var(--sub); margin-bottom: 4px; }
 .keyword .input { font-size: 14px; padding: 8px 10px; }
+.add-row .btn.add-sub { flex: 1; }
+#sPay { margin-bottom: 0; }
 .seg.small { margin: 0 0 10px; }
 
 .dialog-wrap { position: fixed; inset: 0; z-index: 40; display: none; place-items: center; padding: 24px; background: var(--backdrop); }
@@ -300,6 +302,26 @@ body.sorting, body.sorting * { cursor: grabbing !important; user-select: none; -
   </div>
 </section>
 
+<section class="sheet" id="subSheet" aria-label="固定費の入力">
+  <div class="grabber"></div>
+  <h2 id="subTitle">固定費を追加</h2>
+  <label class="field"><span>名前</span><input class="input" id="sName" autocomplete="off" placeholder="例: Netflix"></label>
+  <label class="field"><span>金額</span>
+    <div class="amount-wrap"><input class="input" id="sAmount" inputmode="numeric" autocomplete="off" placeholder="0"></div>
+  </label>
+  <label class="field"><span>毎月の日にち(その月に無い日は月末)</span><select class="input" id="sDay"></select></label>
+  <div class="field"><span>支払い方法</span>
+    <div class="seg" id="sPay"><button data-pay="card">カード</button><button data-pay="other">その他</button></div>
+  </div>
+  <label class="field" id="sMailField"><span>メールに出る名前(この言葉を含み同じ金額のカード通知は、同じ支払いとみなします)</span>
+    <input class="input" id="sMail" autocomplete="off" placeholder="例: NETFLIX"></label>
+  <div class="sheet-actions">
+    <button class="btn danger" id="sDelete" data-action="delete-sub">削除</button>
+    <button class="btn ghost" data-action="close-sheet">やめる</button>
+    <button class="btn primary" id="sSave" data-action="save-sub">保存</button>
+  </div>
+</section>
+
 <div class="dialog-wrap" id="dialogWrap">
   <div class="dialog" role="alertdialog">
     <p id="dialogText"></p>
@@ -359,6 +381,7 @@ function defaultData() {
   return {
     categories: defaultCategories(),
     records: sampleRecords(),
+    subs: [],
     shopRules: { 'セブン-イレブン': 'food', 'Suica': 'transport', 'Netflix': 'subsc', 'マツモトキヨシ': 'daily', 'ユニクロ': 'clothes', 'メルカリ': 'hobby' },
   };
 }
@@ -372,6 +395,7 @@ function load() {
     if (!Array.isArray(d.categories)) d.categories = defaultCategories();
     if (!Array.isArray(d.records)) d.records = [];
     if (!d.shopRules || typeof d.shopRules !== 'object') d.shopRules = {};
+    if (!Array.isArray(d.subs)) d.subs = [];
     return d;
   } catch (e) {
     return defaultData();
@@ -436,6 +460,12 @@ async function fetchMail(manual) {
     let added = 0;
     (json.items || []).forEach(it => {
       if (known.has(it.id)) return;
+      // 先に自動で入れた固定費(カード)と同じ支払いなら、新しく作らずメールで確認済みにする
+      const subRec = data.records.find(r => r.source === 'sub' && r.card && !r.mailId && sameSubPayment(r.mailName, r.amount, r.date, it));
+      if (subRec) {
+        Object.assign(subRec, { source: 'mail', mailId: it.id, date: it.date });
+        return;
+      }
       const cat = ruleFor(it.shop, 'expense');
       data.records.push({ id: uid(), mailId: it.id, type: 'expense', date: it.date, amount: it.amount, shop: it.shop, categoryId: cat ? cat.id : null, memo: '', source: 'mail' });
       added++;
@@ -458,7 +488,48 @@ function autoFetch() {
   lastAutoFetch = Date.now();
   fetchMail(false);
 }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoFetch(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  runSubs();
+  render();
+  autoFetch();
+});
+
+// ---- 固定費(サブスク) ----
+const SUB_MATCH_DAYS = 7;
+const lastDayOf = (y, m) => new Date(y, m, 0).getDate();
+const dayDiff = (a, b) => Math.abs(new Date(a) - new Date(b)) / 86400000;
+const subCatId = () => (catById('subsc') ? 'subsc' : null);
+
+function sameSubPayment(mailName, amount, date, rec) {
+  return !!mailName && rec.amount === amount && norm(rec.shop).includes(norm(mailName)) && dayDiff(rec.date, date) <= SUB_MATCH_DAYS;
+}
+
+// 登録日以降で、まだ足していない月の分を今日まで足す
+function runSubs() {
+  const today = ymd(new Date());
+  data.subs.forEach(sub => {
+    const [sy, sm] = (sub.lastMonth || sub.startDate).split('-').map(Number);
+    let d = new Date(sy, sub.lastMonth ? sm : sm - 1, 1);
+    for (;;) {
+      const y = d.getFullYear(), m = d.getMonth() + 1;
+      const date = `${y}-${pad(m)}-${pad(Math.min(sub.day, lastDayOf(y, m)))}`;
+      if (date > today) break;
+      if (date >= sub.startDate) {
+        const mail = sub.card && data.records.find(r => r.source === 'mail' && !r.subId && sameSubPayment(sub.mailName, sub.amount, date, r));
+        if (mail) {
+          mail.subId = sub.id;
+          if (!mail.categoryId) mail.categoryId = subCatId();
+        } else {
+          data.records.push({ id: uid(), type: 'expense', date, amount: sub.amount, shop: sub.name, categoryId: subCatId(), memo: '', source: 'sub', subId: sub.id, card: sub.card, mailName: sub.mailName });
+        }
+      }
+      sub.lastMonth = `${y}-${pad(m)}`;
+      d = new Date(y, m, 1);
+    }
+  });
+  save();
+}
 
 const now = new Date();
 const ui = { tab: 'home', year: now.getFullYear(), month: now.getMonth(), setType: 'expense' };
@@ -466,10 +537,11 @@ const ui = { tab: 'home', year: now.getFullYear(), month: now.getMonth(), setTyp
 const catById = id => data.categories.find(c => c.id === id);
 const catsOf = type => data.categories.filter(c => c.type === type);
 const monthKey = () => `${ui.year}-${pad(ui.month + 1)}`;
-// カード(メールから入った記録)は使った日の翌月=引き落とし月(26日)で数える
+// カード(メールから入った記録とカード払いの固定費)は使った日の翌月=引き落とし月(26日)で数える
+const isCard = r => r.source === 'mail' || (r.source === 'sub' && r.card);
 function countMonthKey(r) {
   const [y, m] = r.date.split('-').map(Number);
-  const d = new Date(y, r.source === 'mail' ? m : m - 1, 1);
+  const d = new Date(y, isCard(r) ? m : m - 1, 1);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
 const monthRecords = () => data.records.filter(r => countMonthKey(r) === monthKey());
@@ -513,7 +585,8 @@ function recordRow(r) {
       <span class="name">${esc(r.shop || (c ? c.name : '記録'))}</span>
       <span class="meta">${dateLabel(r.date)}
         ${c ? `<span class="tag">${esc(c.name)}</span>` : '<span class="tag warn">未分類</span>'}
-        ${r.source === 'mail' ? '<span class="tag mail">メール</span>' : '<span class="tag">手入力</span>'}
+        ${r.source === 'mail' ? '<span class="tag mail">メール</span>' : r.source === 'sub' ? '' : '<span class="tag">手入力</span>'}
+        ${r.subId ? '<span class="tag">固定費</span>' : ''}
         ${r.type === 'expense' && r.amount < 0 ? '<span class="tag">返品</span>' : ''}
         ${r.memo ? esc(r.memo) : ''}</span>
     </span>
@@ -550,9 +623,9 @@ function renderHome() {
 function renderList() {
   const list = monthRecords().sort(byDateDesc);
   if (!list.length) return '<div class="empty">この月の記録はまだありません。<br>右下の + から追加できます</div>';
-  const card = list.filter(r => r.source === 'mail');
+  const card = list.filter(isCard);
   const groups = {};
-  list.filter(r => r.source !== 'mail').forEach(r => (groups[r.date] = groups[r.date] || []).push(r));
+  list.filter(r => !isCard(r)).forEach(r => (groups[r.date] = groups[r.date] || []).push(r));
   const cardHtml = card.length ? `<div class="date-head"><span>カード ${cardLabel()}</span><span>${yen(total(card, 'expense'))}</span></div>
     <div class="list">${card.map(recordRow).join('')}</div>` : '';
   return cardHtml + Object.keys(groups).map(date => {
@@ -606,6 +679,13 @@ function renderSettings() {
         <span class="name">${esc(shop)}<div class="sub">→ ${c ? esc(c.name) : '(削除済み)'}</div></span>
         <button class="small-btn" data-action="delete-rule" data-shop="${esc(shop)}">削除</button></div>`;
     }).join('') : '<div class="empty">まだありません。未分類を分けるときに覚えさせられます</div>'}
+  </div>
+  <div class="section-title">固定費(サブスク) 月${yen(data.subs.reduce((s, x) => s + x.amount, 0))}</div>
+  <div class="list">
+    ${data.subs.map(s => `<button class="row" data-action="edit-sub" data-id="${s.id}">
+      <span class="main"><span class="name">${esc(s.name)}</span><span class="meta">毎月${s.day}日・${s.card ? 'カード' : 'その他'}</span></span>
+      <span class="amt exp">${yen(s.amount)}</span></button>`).join('')}
+    <div class="add-row"><button class="btn add-sub" data-action="new-sub">固定費を追加</button></div>
   </div>
   <div class="section-title">Gmail連携(三井住友カード)</div>
   <div class="list">
@@ -700,14 +780,80 @@ function openSheet(rec) {
 function closeSheet() {
   $('backdrop').classList.remove('open');
   $('sheet').classList.remove('open');
+  $('subSheet').classList.remove('open');
   document.activeElement && document.activeElement.blur();
 }
 
+const digitsOnly = s => s.replace(/[^0-9０-９]/g, '').replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/^0+(?=\d)/, '');
 $('fAmount').addEventListener('input', e => {
-  const v = e.target.value.replace(/[^0-9０-９]/g, '').replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/^0+(?=\d)/, '');
-  e.target.value = v;
+  e.target.value = digitsOnly(e.target.value);
   renderForm();
 });
+
+// ---- 固定費の入力シート ----
+const subForm = { id: null, card: true, mailTouched: false };
+$('sDay').innerHTML = Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}">${i + 1}日</option>`).join('');
+
+function renderSubForm() {
+  document.querySelectorAll('#sPay button').forEach(b => b.classList.toggle('on', (b.dataset.pay === 'card') === subForm.card));
+  $('sMailField').hidden = !subForm.card;
+  $('sSave').disabled = !($('sName').value.trim() && parseInt($('sAmount').value, 10) > 0 && (!subForm.card || $('sMail').value.trim()));
+}
+
+function openSubSheet(sub) {
+  subForm.id = sub ? sub.id : null;
+  subForm.card = sub ? sub.card : true;
+  subForm.mailTouched = !!sub;
+  $('sName').value = sub ? sub.name : '';
+  $('sAmount').value = sub ? sub.amount : '';
+  $('sDay').value = String(sub ? sub.day : new Date().getDate());
+  $('sMail').value = sub ? sub.mailName : '';
+  $('subTitle').textContent = sub ? '固定費を編集' : '固定費を追加';
+  $('sDelete').hidden = !sub;
+  renderSubForm();
+  $('backdrop').classList.add('open');
+  $('subSheet').classList.add('open');
+}
+
+$('sAmount').addEventListener('input', e => { e.target.value = digitsOnly(e.target.value); renderSubForm(); });
+$('sName').addEventListener('input', () => {
+  if (!subForm.mailTouched) $('sMail').value = $('sName').value;
+  renderSubForm();
+});
+$('sMail').addEventListener('input', () => { subForm.mailTouched = true; renderSubForm(); });
+$('sPay').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  subForm.card = b.dataset.pay === 'card';
+  renderSubForm();
+});
+
+function saveSub() {
+  const name = $('sName').value.trim();
+  const amount = parseInt($('sAmount').value, 10);
+  if (!name || !(amount > 0)) return;
+  const fields = { name, amount, day: Number($('sDay').value), card: subForm.card, mailName: subForm.card ? $('sMail').value.trim() : '' };
+  if (subForm.id) {
+    Object.assign(data.subs.find(s => s.id === subForm.id), fields);
+    toast('固定費を更新しました(これから先の分に反映)');
+  } else {
+    data.subs.push({ id: uid(), ...fields, startDate: ymd(new Date()), lastMonth: null });
+    toast(`「${name}」を固定費に追加しました`);
+  }
+  runSubs();
+  closeSheet();
+  render();
+}
+
+async function deleteSub() {
+  const sub = data.subs.find(s => s.id === subForm.id);
+  if (!(await confirmDialog(`「${sub.name}」の固定費を削除します。\nこれまでに入った記録はそのまま残ります。`))) return;
+  data.subs = data.subs.filter(s => s.id !== sub.id);
+  save();
+  closeSheet();
+  render();
+  toast(`「${sub.name}」を削除しました`);
+}
 $('fShop').addEventListener('input', () => {
   const ruleCat = ruleFor($('fShop').value, form.type);
   if (ruleCat && !form.catTouched) {
@@ -882,6 +1028,10 @@ document.addEventListener('click', async e => {
   else if (a === 'set-type') { ui.setType = el.dataset.type; render(); }
   else if (a === 'add-cat') addCategory();
   else if (a === 'delete-cat') deleteCategory(el.dataset.id);
+  else if (a === 'new-sub') openSubSheet(null);
+  else if (a === 'edit-sub') openSubSheet(data.subs.find(s => s.id === el.dataset.id));
+  else if (a === 'save-sub') saveSub();
+  else if (a === 'delete-sub') deleteSub();
   else if (a === 'save-conn') saveConn();
   else if (a === 'fetch-mail') fetchMail(true);
   else if (a === 'delete-samples') {
@@ -900,6 +1050,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'newCat') addCategory();
 });
 
+runSubs();
 render();
 autoFetch();
 </script>
