@@ -80,7 +80,7 @@ main { padding: 0 16px; }
 
 .banner {
   display: flex; align-items: center; gap: 10px; width: 100%;
-  padding: 12px 14px; margin-bottom: 16px; text-align: left;
+  padding: 8px 12px; margin-bottom: 12px; text-align: left; font-size: 14px;
   background: var(--warn-bg); color: var(--warn-text);
   border: 1px solid var(--warn-line); border-radius: 14px; font-weight: 600;
 }
@@ -94,7 +94,15 @@ main { padding: 0 16px; }
 .split .label { font-size: 12px; color: var(--sub); }
 .split .num { font-size: 18px; font-weight: 700; }
 .card-note { font-size: 12px; color: var(--sub); margin-top: 10px; }
-.bal-empty { display: block; width: 100%; margin-bottom: 16px; padding: 12px 14px; text-align: left; border: 1px dashed var(--line); border-radius: 14px; background: none; color: var(--sub); font-size: 13px; }
+.bal-link { display: block; width: 100%; padding: 4px 0; text-align: left; border: 0; background: none; color: var(--sub); font-size: 13px; }
+.home-divider { height: 1px; background: var(--line); margin: 14px 0 12px; }
+.month3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.month3 .label { font-size: 12px; color: var(--sub); }
+.month3 .num { font-size: 16px; font-weight: 700; white-space: nowrap; }
+.menu-row .menu-val { color: var(--sub); font-size: 14px; white-space: nowrap; }
+.menu-row .chev { color: var(--sub); font-size: 18px; margin-left: 2px; }
+.page-note { font-size: 12px; color: var(--sub); margin: 10px 4px; }
+#setView { padding-top: 4px; }
 .exp { color: var(--expense); }
 .inc { color: var(--income); }
 
@@ -276,6 +284,16 @@ body.sorting, body.sorting * { cursor: grabbing !important; user-select: none; -
       <h1>未分類の支払い</h1>
     </header>
     <main id="uncatView"></main>
+  </div>
+</section>
+
+<section class="page" id="setPage" aria-label="設定の項目">
+  <div class="page-inner">
+    <header class="top">
+      <button class="icon-btn" data-action="close-set" aria-label="戻る"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <h1 id="setTitle"></h1>
+    </header>
+    <main id="setView"></main>
   </div>
 </section>
 
@@ -570,12 +588,10 @@ function balanceInfo() {
 
 function balanceHtml() {
   const info = balanceInfo();
-  if (!info) return '<button class="bal-empty" data-action="go-balance">設定で口座の残高を入れると表示されます ›</button>';
-  return `<div class="card">
-    <div class="balance-label">口座残高(今日時点)</div>
+  if (!info) return '<button class="bal-link" data-action="go-balance">口座の残高を設定すると、ここに表示されます ›</button>';
+  return `<div class="balance-label">口座残高(今日時点)</div>
     <div class="balance ${info.now < 0 ? 'exp' : ''}">${signedYen(info.now)}</div>
-    ${info.pending ? `<div class="card-note">${info.nextLabel} 引き落とし予定 ${signedYen(info.pending)} → 引き落とし後 ${signedYen(info.after)}</div>` : ''}
-  </div>`;
+    ${info.pending ? `<div class="card-note">${info.nextLabel} 引き落とし予定 ${signedYen(info.pending)} → 引き落とし後 ${signedYen(info.after)}</div>` : ''}`;
 }
 
 function saveBalance() {
@@ -627,10 +643,7 @@ function recordRow(r) {
       <span class="name">${esc(r.shop || (c ? c.name : '記録'))}</span>
       <span class="meta">${dateLabel(r.date)}
         ${c ? `<span class="tag">${esc(c.name)}</span>` : '<span class="tag warn">未分類</span>'}
-        ${r.source === 'mail' ? '<span class="tag mail">メール</span>' : r.source === 'sub' ? '' : '<span class="tag">手入力</span>'}
-        ${r.subId ? '<span class="tag">固定費</span>' : ''}
-        ${r.type === 'expense' && r.amount < 0 ? '<span class="tag">返品</span>' : ''}
-        ${r.memo ? esc(r.memo) : ''}</span>
+        ${r.type === 'expense' && r.amount < 0 ? '<span class="tag">返品</span>' : ''}</span>
     </span>
     ${amountHtml(r)}
   </button>`;
@@ -649,15 +662,14 @@ function renderHome() {
   const exp = total(list, 'expense'), inc = total(list, 'income');
   const recent = list.slice().sort(byDateDesc).slice(0, 5);
   return `${bannerHtml()}
-  ${balanceHtml()}
   <div class="card">
-    <div class="balance-label">${ui.month + 1}月の収支</div>
-    <div class="balance ${inc - exp < 0 ? 'exp' : ''}">${inc - exp < 0 ? '-' : ''}${yen(Math.abs(inc - exp))}</div>
-    <div class="split">
-      <div><div class="label">支出</div><div class="num exp">${yen(exp)}</div></div>
+    ${balanceHtml()}
+    <div class="home-divider"></div>
+    <div class="month3">
+      <div><div class="label">${ui.month + 1}月の支出</div><div class="num exp">${yen(exp)}</div></div>
       <div><div class="label">収入</div><div class="num inc">${yen(inc)}</div></div>
+      <div><div class="label">収支</div><div class="num ${inc - exp < 0 ? 'exp' : ''}">${signedYen(inc - exp)}</div></div>
     </div>
-    <div class="card-note">カード: ${cardLabel()}</div>
   </div>
   <div class="section-title">最近の記録</div>
   ${recent.length ? `<div class="list">${recent.map(recordRow).join('')}</div>` : '<div class="empty">この月の記録はまだありません</div>'}`;
@@ -699,11 +711,84 @@ function renderSummary() {
   return `${summaryBlock(list, 'expense')}<div class="section-title">収入</div>${summaryBlock(list, 'income')}`;
 }
 
+// ---- 設定: 最初はメニューだけ。項目を押すと右から画面が出る ----
+function menuRow(page, label, value) {
+  return `<button class="row menu-row" data-action="open-set" data-page="${page}">
+    <span class="main"><span class="name">${label}</span></span>
+    <span class="menu-val">${esc(value)}</span><span class="chev">›</span></button>`;
+}
+
 function renderSettings() {
+  const info = balanceInfo();
+  const subTotal = data.subs.reduce((s, x) => s + x.amount, 0);
+  const gmail = !conn.url || !conn.key ? '未設定'
+    : conn.lastResult.includes('失敗') ? '読み込みに失敗'
+    : conn.lastFetch ? `前回 ${dateLabel(conn.lastFetch)}` : 'まだ読み込んでいません';
+  const samples = data.records.filter(r => r.sample).length;
+  return `<div class="section-title">お金</div>
+  <div class="list">
+    ${menuRow('balance', '口座の残高', info ? signedYen(info.now) : '未設定')}
+    ${menuRow('subs', '固定費(サブスク)', `月${yen(subTotal)}`)}
+  </div>
+  <div class="section-title">分類</div>
+  <div class="list">
+    ${menuRow('cats', 'カテゴリー', `${data.categories.length}件`)}
+    ${menuRow('rules', '覚えたお店', `${Object.keys(data.shopRules).length}件`)}
+  </div>
+  <div class="section-title">連携</div>
+  <div class="list">${menuRow('gmail', 'Gmail連携(三井住友カード)', gmail)}</div>
+  ${samples ? `<div class="section-title">見本データ</div>
+  <div class="list"><div class="set-row"><span class="name">最初に入っている見本の記録<div class="sub">${samples}件</div></span>
+    <button class="small-btn" data-action="delete-samples">消す</button></div></div>` : ''}`;
+}
+
+const SET_PAGES = {
+  balance: { title: '口座の残高', html: () => `<div class="list">
+    <div class="conn">
+      <label class="field"><span>今日の口座の残高</span>
+        <div class="amount-wrap"><input class="input" id="balInput" inputmode="numeric" autocomplete="off" placeholder="0"></div></label>
+      <div class="sheet-actions"><button class="btn primary" data-action="save-balance">今日の残高として保存</button></div>
+      <div class="sub conn-status">${data.balance ? `基準: ${dateLabel(data.balance.baseDate)} 時点 ${signedYen(data.balance.base)}(実際の口座とずれたら、今日の残高を入れ直してください)` : 'まだ入れていません'}</div>
+    </div>
+  </div>` },
+  subs: { title: '固定費(サブスク)', html: () => `<div class="section-title">毎月の合計 ${yen(data.subs.reduce((s, x) => s + x.amount, 0))}</div>
+  <div class="list">
+    ${data.subs.map(s => `<button class="row" data-action="edit-sub" data-id="${s.id}">
+      <span class="main"><span class="name">${esc(s.name)}</span><span class="meta">毎月${s.day}日・${s.card ? 'カード' : 'その他'}</span></span>
+      <span class="amt exp">${yen(s.amount)}</span></button>`).join('')}
+    <div class="add-row"><button class="btn add-sub" data-action="new-sub">固定費を追加</button></div>
+  </div>` },
+  cats: { title: 'カテゴリー', html: renderCategories },
+  rules: { title: '覚えたお店', html: renderRules },
+  gmail: { title: 'Gmail連携', html: () => `<div class="list">
+    <div class="conn">
+      <label class="field"><span>メール係の住所(URL)</span><input class="input" id="connUrl" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(conn.url)}"></label>
+      <label class="field"><span>合言葉</span><input class="input" id="connKey" type="password" autocomplete="off" value="${esc(conn.key)}"></label>
+      <div class="sheet-actions">
+        <button class="btn ghost" data-action="save-conn">保存</button>
+        <button class="btn primary" data-action="fetch-mail" ${conn.url && conn.key && !fetching ? '' : 'disabled'}>${fetching ? '読み込み中…' : '今すぐ読み込む'}</button>
+      </div>
+      <div class="sub conn-status">${esc(connStatus())}</div>
+    </div>
+  </div>` },
+};
+
+function openSetPage(page) {
+  ui.setPage = page;
+  renderSetPage();
+  $('setPage').scrollTop = 0;
+  $('setPage').classList.add('open');
+}
+function renderSetPage() {
+  const p = SET_PAGES[ui.setPage];
+  if (!p) return;
+  $('setTitle').textContent = p.title;
+  $('setView').innerHTML = p.html();
+}
+
+function renderCategories() {
   const cats = catsOf(ui.setType);
-  const rules = Object.entries(data.shopRules);
-  return `<div class="section-title">カテゴリー</div>
-  <div class="seg small" id="setSeg">
+  return `<div class="seg small" id="setSeg">
     <button data-action="set-type" data-type="expense" class="${ui.setType === 'expense' ? 'on' : ''}">支出</button>
     <button data-action="set-type" data-type="income" class="${ui.setType === 'income' ? 'on' : ''}">収入</button>
   </div>
@@ -714,46 +799,19 @@ function renderSettings() {
       <button class="small-btn" data-action="delete-cat" data-id="${c.id}">削除</button></div>`).join('')}
     <div class="add-row"><input class="input" id="newCat" placeholder="新しいカテゴリー" autocomplete="off"><button class="btn" data-action="add-cat">追加</button></div>
   </div>
-  <div class="section-title">覚えたお店</div>
-  <div class="list">
+  <div class="sub page-note">左の点をつかんで上下に動かすと、並び順を変えられます</div>`;
+}
+
+function renderRules() {
+  const rules = Object.entries(data.shopRules);
+  return `<div class="list">
     ${rules.length ? rules.map(([shop, id]) => {
       const c = catById(id);
       return `<div class="set-row"><span class="dot" style="background:${c ? c.color : 'var(--line)'}"></span>
         <span class="name">${esc(shop)}<div class="sub">→ ${c ? esc(c.name) : '(削除済み)'}</div></span>
         <button class="small-btn" data-action="delete-rule" data-shop="${esc(shop)}">削除</button></div>`;
     }).join('') : '<div class="empty">まだありません。未分類を分けるときに覚えさせられます</div>'}
-  </div>
-  <div class="section-title">固定費(サブスク) 月${yen(data.subs.reduce((s, x) => s + x.amount, 0))}</div>
-  <div class="list">
-    ${data.subs.map(s => `<button class="row" data-action="edit-sub" data-id="${s.id}">
-      <span class="main"><span class="name">${esc(s.name)}</span><span class="meta">毎月${s.day}日・${s.card ? 'カード' : 'その他'}</span></span>
-      <span class="amt exp">${yen(s.amount)}</span></button>`).join('')}
-    <div class="add-row"><button class="btn add-sub" data-action="new-sub">固定費を追加</button></div>
-  </div>
-  <div class="section-title" id="balSection">口座の残高</div>
-  <div class="list">
-    <div class="conn">
-      <label class="field"><span>今日の口座の残高</span>
-        <div class="amount-wrap"><input class="input" id="balInput" inputmode="numeric" autocomplete="off" placeholder="0"></div></label>
-      <div class="sheet-actions"><button class="btn primary" data-action="save-balance">今日の残高として保存</button></div>
-      <div class="sub conn-status">${data.balance ? `基準: ${dateLabel(data.balance.baseDate)} 時点 ${signedYen(data.balance.base)}(実際の口座とずれたら、今日の残高を入れ直してください)` : 'まだ入れていません'}</div>
-    </div>
-  </div>
-  <div class="section-title">Gmail連携(三井住友カード)</div>
-  <div class="list">
-    <div class="conn">
-      <label class="field"><span>メール係の住所(URL)</span><input class="input" id="connUrl" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(conn.url)}"></label>
-      <label class="field"><span>合言葉</span><input class="input" id="connKey" type="password" autocomplete="off" value="${esc(conn.key)}"></label>
-      <div class="sheet-actions">
-        <button class="btn ghost" data-action="save-conn">保存</button>
-        <button class="btn primary" data-action="fetch-mail" ${conn.url && conn.key && !fetching ? '' : 'disabled'}>${fetching ? '読み込み中…' : '今すぐ読み込む'}</button>
-      </div>
-      <div class="sub conn-status">${esc(connStatus())}</div>
-    </div>
-  </div>
-  ${data.records.some(r => r.sample) ? `<div class="section-title">見本データ</div>
-  <div class="list"><div class="set-row"><span class="name">最初に入っている見本の記録<div class="sub">${data.records.filter(r => r.sample).length}件</div></span>
-    <button class="small-btn" data-action="delete-samples">消す</button></div></div>` : ''}`;
+  </div>`;
 }
 
 const TITLES = { home: 'ホーム', list: '明細', summary: '集計', settings: '設定' };
@@ -766,6 +824,7 @@ function render() {
   const view = { home: renderHome, list: renderList, summary: renderSummary, settings: renderSettings }[ui.tab];
   $('view').innerHTML = view();
   if ($('uncatPage').classList.contains('open')) renderUncat();
+  if ($('setPage').classList.contains('open')) renderSetPage();
 }
 
 function renderUncat() {
@@ -1081,7 +1140,9 @@ document.addEventListener('click', async e => {
   else if (a === 'add-cat') addCategory();
   else if (a === 'delete-cat') deleteCategory(el.dataset.id);
   else if (a === 'save-balance') saveBalance();
-  else if (a === 'go-balance') { ui.tab = 'settings'; render(); $('balSection').scrollIntoView({ block: 'start' }); }
+  else if (a === 'go-balance') { ui.tab = 'settings'; render(); openSetPage('balance'); }
+  else if (a === 'open-set') openSetPage(el.dataset.page);
+  else if (a === 'close-set') { $('setPage').classList.remove('open'); ui.setPage = null; render(); }
   else if (a === 'new-sub') openSubSheet(null);
   else if (a === 'edit-sub') openSubSheet(data.subs.find(s => s.id === el.dataset.id));
   else if (a === 'save-sub') saveSub();
