@@ -94,6 +94,7 @@ main { padding: 0 16px; }
 .split .label { font-size: 12px; color: var(--sub); }
 .split .num { font-size: 18px; font-weight: 700; }
 .card-note { font-size: 12px; color: var(--sub); margin-top: 10px; }
+.bal-empty { display: block; width: 100%; margin-bottom: 16px; padding: 12px 14px; text-align: left; border: 1px dashed var(--line); border-radius: 14px; background: none; color: var(--sub); font-size: 13px; }
 .exp { color: var(--expense); }
 .inc { color: var(--income); }
 
@@ -545,6 +546,47 @@ function countMonthKey(r) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
 const monthRecords = () => data.records.filter(r => countMonthKey(r) === monthKey());
+// ---- 口座の残高 ----
+const signedYen = n => (n < 0 ? '-' : '') + yen(Math.abs(n));
+// 口座でお金が動く日。カードは引き落とし月の26日
+const moveDate = r => (isCard(r) ? `${countMonthKey(r)}-26` : r.date);
+
+function balanceInfo() {
+  const b = data.balance;
+  if (!b) return null;
+  const today = ymd(new Date());
+  let now = b.base;
+  data.records.forEach(r => {
+    const d = moveDate(r);
+    // 基準日当日の動きは入れた残高に含まれているとみなす
+    if (d > b.baseDate && d <= today) now += r.type === 'income' ? r.amount : -r.amount;
+  });
+  const t = new Date();
+  const next = new Date(t.getFullYear(), t.getMonth() + (t.getDate() >= 26 ? 1 : 0), 1);
+  const nextKey = `${next.getFullYear()}-${pad(next.getMonth() + 1)}`;
+  const pending = data.records.filter(r => isCard(r) && countMonthKey(r) === nextKey).reduce((s, r) => s + r.amount, 0);
+  return { now, nextLabel: `${next.getMonth() + 1}/26`, pending, after: now - pending };
+}
+
+function balanceHtml() {
+  const info = balanceInfo();
+  if (!info) return '<button class="bal-empty" data-action="go-balance">設定で口座の残高を入れると表示されます ›</button>';
+  return `<div class="card">
+    <div class="balance-label">口座残高(今日時点)</div>
+    <div class="balance ${info.now < 0 ? 'exp' : ''}">${signedYen(info.now)}</div>
+    ${info.pending ? `<div class="card-note">${info.nextLabel} 引き落とし予定 ${signedYen(info.pending)} → 引き落とし後 ${signedYen(info.after)}</div>` : ''}
+  </div>`;
+}
+
+function saveBalance() {
+  const v = $('balInput').value;
+  if (v === '') return toast('今日の口座の残高を入れてください');
+  data.balance = { base: parseInt(v, 10), baseDate: ymd(new Date()) };
+  save();
+  render();
+  toast('口座の残高を保存しました');
+}
+
 function cardLabel() {
   const used = new Date(ui.year, ui.month - 1, 1).getMonth() + 1;
   return `${ui.month + 1}/26引き落とし(${used}月利用分)`;
@@ -607,6 +649,7 @@ function renderHome() {
   const exp = total(list, 'expense'), inc = total(list, 'income');
   const recent = list.slice().sort(byDateDesc).slice(0, 5);
   return `${bannerHtml()}
+  ${balanceHtml()}
   <div class="card">
     <div class="balance-label">${ui.month + 1}月の収支</div>
     <div class="balance ${inc - exp < 0 ? 'exp' : ''}">${inc - exp < 0 ? '-' : ''}${yen(Math.abs(inc - exp))}</div>
@@ -686,6 +729,15 @@ function renderSettings() {
       <span class="main"><span class="name">${esc(s.name)}</span><span class="meta">毎月${s.day}日・${s.card ? 'カード' : 'その他'}</span></span>
       <span class="amt exp">${yen(s.amount)}</span></button>`).join('')}
     <div class="add-row"><button class="btn add-sub" data-action="new-sub">固定費を追加</button></div>
+  </div>
+  <div class="section-title" id="balSection">口座の残高</div>
+  <div class="list">
+    <div class="conn">
+      <label class="field"><span>今日の口座の残高</span>
+        <div class="amount-wrap"><input class="input" id="balInput" inputmode="numeric" autocomplete="off" placeholder="0"></div></label>
+      <div class="sheet-actions"><button class="btn primary" data-action="save-balance">今日の残高として保存</button></div>
+      <div class="sub conn-status">${data.balance ? `基準: ${dateLabel(data.balance.baseDate)} 時点 ${signedYen(data.balance.base)}(実際の口座とずれたら、今日の残高を入れ直してください)` : 'まだ入れていません'}</div>
+    </div>
   </div>
   <div class="section-title">Gmail連携(三井住友カード)</div>
   <div class="list">
@@ -1028,6 +1080,8 @@ document.addEventListener('click', async e => {
   else if (a === 'set-type') { ui.setType = el.dataset.type; render(); }
   else if (a === 'add-cat') addCategory();
   else if (a === 'delete-cat') deleteCategory(el.dataset.id);
+  else if (a === 'save-balance') saveBalance();
+  else if (a === 'go-balance') { ui.tab = 'settings'; render(); $('balSection').scrollIntoView({ block: 'start' }); }
   else if (a === 'new-sub') openSubSheet(null);
   else if (a === 'edit-sub') openSubSheet(data.subs.find(s => s.id === el.dataset.id));
   else if (a === 'save-sub') saveSub();
@@ -1045,6 +1099,9 @@ document.addEventListener('click', async e => {
     delete data.shopRules[shop];
     save(); render(); toast(`「${shop}」を外しました`);
   }
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'balInput') e.target.value = digitsOnly(e.target.value);
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'newCat') addCategory();
