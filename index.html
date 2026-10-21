@@ -308,7 +308,12 @@ body.sorting, body.sorting * { cursor: grabbing !important; user-select: none; -
   <label class="field"><span>金額</span>
     <div class="amount-wrap"><input class="input" id="fAmount" inputmode="numeric" autocomplete="off" placeholder="0"></div>
   </label>
-  <label class="field"><span>日付</span><input class="input" type="date" id="fDate"></label>
+  <div class="field" id="payField"><span>支払い方法</span>
+    <div class="seg" id="paySeg"><button data-pay="cash">現金など</button><button data-pay="card">カード払い</button></div>
+  </div>
+  <label class="field"><span>日付</span><input class="input" type="date" id="fDate">
+    <div class="hint" id="dateHint"></div>
+  </label>
   <label class="field"><span>お店・内容</span><input class="input" id="fShop" autocomplete="off" placeholder="例: セブン-イレブン">
     <div class="hint" id="shopHint"></div>
   </label>
@@ -557,7 +562,13 @@ const catById = id => data.categories.find(c => c.id === id);
 const catsOf = type => data.categories.filter(c => c.type === type);
 const monthKey = () => `${ui.year}-${pad(ui.month + 1)}`;
 // カード(メールから入った記録とカード払いの固定費)は使った日の翌月=引き落とし月(26日)で数える
-const isCard = r => r.source === 'mail' || (r.source === 'sub' && r.card);
+const isCard = r => r.source === 'mail' || !!r.card;
+// カードの利用日から「何月26日の引き落とし分か」の案内を作る
+function billingText(date) {
+  const [y, m] = date.split('-').map(Number);
+  const next = new Date(y, m, 1);
+  return `→ ${next.getMonth() + 1}/26 引き落とし分(${m}月利用)`;
+}
 function countMonthKey(r) {
   const [y, m] = r.date.split('-').map(Number);
   const d = new Date(y, isCard(r) ? m : m - 1, 1);
@@ -862,10 +873,15 @@ function confirmDialog(text, okLabel = '削除する') {
 }
 
 // ---- 入力シート ----
-const form = { id: null, type: 'expense', categoryId: null, catTouched: false, refund: false };
+const form = { id: null, type: 'expense', categoryId: null, catTouched: false, refund: false, card: false, isMail: false };
 
 function renderForm() {
   document.querySelectorAll('#typeSeg button').forEach(b => b.classList.toggle('on', b.dataset.type === form.type));
+  const showPay = form.type === 'expense' && !form.isMail;
+  $('payField').hidden = !showPay;
+  document.querySelectorAll('#paySeg button').forEach(b => b.classList.toggle('on', (b.dataset.pay === 'card') === form.card));
+  const cardNow = form.type === 'expense' && (form.isMail || form.card);
+  $('dateHint').textContent = cardNow && $('fDate').value ? billingText($('fDate').value) : '';
   $('fCats').innerHTML = catsOf(form.type).map(c =>
     `<button class="chip ${form.categoryId === c.id ? 'on' : ''}" data-action="pick-cat" data-cat="${c.id}"><span class="dot" style="background:${c.color}"></span>${esc(c.name)}</button>`).join('');
   $('saveBtn').disabled = !(parseInt($('fAmount').value, 10) > 0);
@@ -877,6 +893,8 @@ function openSheet(rec) {
   form.categoryId = rec ? rec.categoryId : null;
   form.catTouched = !!rec;
   form.refund = !!rec && rec.amount < 0;
+  form.card = !!rec && !!rec.card;
+  form.isMail = !!rec && rec.source === 'mail';
   $('fAmount').value = rec ? Math.abs(rec.amount) : '';
   $('fDate').value = rec ? rec.date : ymd(new Date());
   $('fShop').value = rec ? rec.shop : '';
@@ -975,6 +993,14 @@ $('fShop').addEventListener('input', () => {
     $('shopHint').textContent = '';
   }
 });
+$('paySeg').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  form.card = b.dataset.pay === 'card';
+  renderForm();
+});
+$('fDate').addEventListener('input', renderForm);
+$('fDate').addEventListener('change', renderForm);
 $('typeSeg').addEventListener('click', e => {
   const b = e.target.closest('button');
   if (!b || b.dataset.type === form.type) return;
@@ -996,6 +1022,7 @@ function saveRecord() {
     categoryId: form.categoryId,
     memo: $('fMemo').value.trim(),
   };
+  if (!form.isMail) rec.card = form.type === 'expense' && form.card;
   let saved;
   if (form.id) {
     saved = Object.assign(data.records.find(r => r.id === form.id), rec);
